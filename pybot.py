@@ -8,6 +8,7 @@ from telepot.loop import MessageLoop
 import netifaces as ni
 import vlc
 import pafy
+import alsaaudio
 
 """
 pybot for telegram control
@@ -36,22 +37,32 @@ def add_video(video):
     best = video.getbest()
     playlist.add_media(instance.media_new(best.url))
 
+def lower_string(commands):
+    command = ''
+    for com in commands.split():
+        if com[:4] == 'http':
+            command += com + ' '
+        else:
+            command += com.lower() + ' '
+    return command[:-1]
+
 def handle(msg):
     global player, list_player, instance
     chat_id = msg['chat']['id']
-    command = msg['text']
+    command = lower_string(msg['text'])
 
     # print('Got command: %s' % command)
 
+    print(command)
     if command == 'commands':
-        answer = ''
+        answer = '\n'
         answer += 'ip'
         answer += '\n'
         answer += 'uptime'
         answer += '\n'
         answer += '<youtube URL to attach to playlist>'
         answer += '\n'
-        answer += 'yt add URL>'
+        answer += 'yt add <URL>'
         answer += '\n'
         answer += 'yt play <URL>'
         answer += '\n'
@@ -68,6 +79,9 @@ def handle(msg):
         answer += 'yt source'
         answer += '\n'
         answer += 'yt previous'
+        answer += '\n'
+        answer += 'volume <%>'
+        
         bot.sendMessage(chat_id, answer)
     
     elif command == 'ip':
@@ -151,6 +165,11 @@ def handle(msg):
             elif com[:8] == 'previous':
                 list_player.previous()
 
+    elif command[:6] == 'volume':
+        vol = int(command[7:])
+        if vol >= 0 and vol <= 100:
+            alsaaudio.Mixer('PCM').setvolume(vol)
+
     else:
         for com in command.split():
             if com[:4] == 'http':
@@ -166,11 +185,14 @@ def handle(msg):
                 except ValueError as v:
                     bot.sendMessage(chat_id, str(v))
                     return
+        #command not recognized
         bot.sendMessage(chat_id, 'command unknown')
 
-bot = telepot.Bot('')
+# bot = telepot.Bot('992988366:AAF2_MtPl75umgM0cqeitevgDT6bLxP094k')
+bot = telepot.Bot(<telegram-token>)
 MessageLoop(bot, handle).run_as_thread()
 print('I am listening ...')
 
 while 1:
     time.sleep(10)
+
