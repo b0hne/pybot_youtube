@@ -1,16 +1,14 @@
 import time
-import threading
+import random
 import datetime as dt
 import telepot
+import sys
 import os
 from telepot.loop import MessageLoop
 import netifaces as ni
 import vlc
-from pytube import YouTube, exceptions as yt_exceptions
+import pafy
 import alsaaudio
-import shutil
-
-video_path = '/tmp/videos'
 
 """
 pybot for telegram control
@@ -19,33 +17,25 @@ player = None
 list_player = None
 playlist = None
 instance = None
-download_size = 0
-percentage_print_counter = 0
-callback_chat_id = 0
-mutex = threading.Lock()
 
-def ip():
-    return ni.ifaddresses('wlan0')[10][0]['addr']
+def start_player():
+    global player, instance
+    instance = vlc.Instance('--play-and-exit', '--fullscreen')
+    player = instance.media_player_new()
+    player.set_fullscreen(True)
+    player.audio_set_mute(False)
 
-def uptime():
-    with open('/proc/uptime', 'r') as f:
-            uptime_seconds = float(f.readline().split()[0])
-            uptime_string = str(dt.timedelta(seconds = uptime_seconds))
-            return uptime_string[:-7]
+def start_playlist():
+    global instance, playlist, list_player
+    playlist = instance.media_list_new()
+    list_player = instance.media_list_player_new()
+    list_player.set_media_list(playlist)
+    list_player.set_media_player(player)
 
-def get_volume():
-    return str(alsaaudio.Mixer().getvolume()[0]) + '%'
-
-def volume(command):
-    if command != "":
-        try:
-            vol = int(command)
-            if vol >= 0 and vol <= 100:
-                alsaaudio.Mixer().setvolume(vol)
-        except ValueError:
-            return 'Volume change not possible. stuck on: ' + get_volume()
-
-    return get_volume()
+def add_video(video):
+    global instance, playlist
+    best = video.getbest()
+    playlist.add_media(instance.media_new(best.url))
 
 def lower_string(commands):
     command = ''
@@ -56,256 +46,150 @@ def lower_string(commands):
             command += com.lower() + ' '
     return command[:-1]
 
-def commands():
-    answer = '\n'
-    answer += 'ip'
-    answer += '\n'
-    answer += 'uptime'
-    answer += '\n'
-    answer += 'play'
-    answer += '\n'
-    answer += 'clear'
-    answer += '\n'
-    answer += 'mute'
-    answer += '\n'
-    answer += 'next'
-    answer += '\n'
-    answer += 'pause'
-    answer += '\n'
-    answer += 'close'
-    answer += '\n'
-    answer += 'previous'
-    answer += '\n'
-    answer += 'next'
-    answer += '\n'
-    answer += 'volume (<%>)'
-    return answer
-
-# preprare vlc
-def start_player():
-    global player, instance
-    instance = vlc.Instance('--play-and-exit', '--fullscreen')
-    player = instance.media_player_new()
-    player.set_fullscreen(True)
-    player.audio_set_mute(False)
-
-# prepare vlc playlist, needs prepared player
-def start_playlist():
-    global instance, playlist, list_player
-    playlist = instance.media_list_new()
-    list_player = instance.media_list_player_new()
-    list_player.set_media_list(playlist)
-    list_player.set_media_player(player)
-
-
-
-
-
-def download_callback(stream, chunks, bytes_remaining):
-    global download_size, percentage_print_counter
-    if download_size == 0:
-        download_size = bytes_remaining
-    percentage = 1 - bytes_remaining/(download_size+0.1)
-    if percentage_print_counter == 0 and percentage >= 0.25 and percentage < 0.75:
-        bot.sendMessage(callback_chat_id, "downloaded 25%")
-        percentage_print_counter = 1
-    if percentage_print_counter == 1 and percentage >= 0.5:
-        bot.sendMessage(callback_chat_id, "downloaded 50%")
-        percentage_print_counter = 2
-    if percentage_print_counter == 2 and percentage >= 0.75:
-        bot.sendMessage(callback_chat_id, "downloaded 75%")
-        percentage_print_counter = 0
-
-
-# add video to playlist, print Volume as prove of reception
-def add_video(yt, chat_id):
-    global playlist, callback_chat_id
-    bot.sendMessage(chat_id, 'trying to initiate download')
-    yt.register_on_progress_callback(download_callback)
-    callback_chat_id = chat_id
-    try:
-        file_path = yt.streams.filter(abr="128kbps").first().download(video_path)
-        print(file_path)
-        playlist.add_media(file_path)
-        bot.sendMessage(chat_id, 'download finished')
-        return True
-
-    except SyntaxError :
-        pass
-
-    except yt_exceptions.RegexMatchError:
-        pass
-    callback_chat_id = 0
-    bot.sendMessage(chat_id, 'command not recognized/Video not found')
-    return False
-
-def previous_video(chat_id):
-    global list_player
-    if instance is not None:
-        list_player.previous()
-    else:
-        bot.sendMessage(chat_id, "nothing is playing")
-
-
-def playing(chat_id):
-    global instance, player
-    if instance == None:
-        bot.sendMessage(chat_id, "Nothing is playing at the moment.")
-    else:
-        print(player.video_get_title_description())
-        bot.sendMessage(chat_id, "youtube is playing")
-
-def pause():
-    global instance, player
-    #toggle pause
-    if instance != None:
-        player.pause()
-
-def play(chat_id):
-    global instance, player, playlist
-    if instance == None:
-        start_player()
-        start_playlist()
-        try:
-            for video in os.listdir(video_path+"/"):
-                abs_path = video_path + "/" + video
-                playlist.add_media(abs_path)
-        except FileNotFoundError:
-            pass
-    if playlist.count() > 0:
-        list_player.play()
-        bot.sendMessage(chat_id, "playing")
-
-    else:
-        bot.sendMessage(chat_id, "nothing to play")
-
-def close(chat_id):
-    global instance, player, playlist
-    if instance != None:
-        player.stop()
-        instance = player = playlist = None
-        bot.sendMessage(chat_id, "closed")
-    else:
-        bot.sendMessage(chat_id, "wasn\'t running")
-
-def clear(chat_id):
-    global player, instance
-    if player != None:
-        close(chat_id)
-    try:
-        shutil.rmtree(video_path)
-        bot.sendMessage(chat_id, "videos have been cleared")
-    except FileNotFoundError:
-        bot.sendMessage(chat_id, "nothing to clear")
-
-
-def mute(chat_id):
-    global instance, player
-    if instance != None:
-        player.audio_toggle_mute()
-    else:
-        bot.sendMessage(chat_id, "nothing is playing")
-
-def next_video(chat_id):
-    global list_player
-    if instance is not None:
-        list_player.next()
-    else:
-        bot.sendMessage(chat_id, "nothing is playing")
-
-def previous_video(chat_id):
-    global list_player
-    if instance is not None:
-        list_player.previous()
-    else:
-        bot.sendMessage(chat_id, "nothing is playing")
-
-
-
-
-def show_playlist(chat_id):
-    global list_player, instance
-    try:
-        for item in os.listdir(video_path+"/"):
-            bot.sendMessage(chat_id, item)
-    except:
-        bot.sendMessage(chat_id, "nothing at that index")
-
-
-
 def handle(msg):
-    global player, list_player, instance, mutex
+    global player, list_player, instance
     chat_id = msg['chat']['id']
     command = lower_string(msg['text'])
 
-    print('Got command: %s' % command)
+    # print('Got command: %s' % command)
 
+    print(command)
     if command == 'commands':
-        bot.sendMessage(chat_id, commands())
+        answer = '\n'
+        answer += 'ip'
+        answer += '\n'
+        answer += 'uptime'
+        answer += '\n'
+        answer += '<youtube URL to attach to playlist>'
+        answer += '\n'
+        answer += 'yt add <URL>'
+        answer += '\n'
+        answer += 'yt play <URL>'
+        answer += '\n'
+        answer += 'yt playlist <playlist URL>'
+        answer += '\n'
+        answer += 'yt mute'
+        answer += '\n'
+        answer += 'yt next'
+        answer += '\n'
+        answer += 'yt pause'
+        answer += '\n'
+        answer += 'yt close'
+        answer += '\n'
+        answer += 'yt source'
+        answer += '\n'
+        answer += 'yt previous'
+        answer += '\n'
+        answer += 'volume <%>'
+        
+        bot.sendMessage(chat_id, answer)
     
     elif command == 'ip':
-        bot.sendMessage(chat_id, ip())
+        ip6 = ni.ifaddresses('wlx24050fa8674d')[10][0]['addr']
+        bot.sendMessage(chat_id, str(ip6))
 
+#    if command == 'status':
+#       status=`dbus-send --print-reply --dest=org.mpris.MediaPlayer2.spotify /org/mpris/MediaPlayer2 or$
     
     elif command == "uptime":
-        bot.sendMessage(chat_id, uptime())
-
-    elif command[:6] == 'volume':
-        bot.sendMessage(chat_id, volume(command[7:]))
-
-
-    else:
-        mutex.acquire()
-
-        if command == 'play':
-            play(chat_id)
-
-        elif command == 'pause':
-            pause()
-
-        elif command == 'stop':
-            close(chat_id)
-
-        elif command == 'mute':
-            mute(chat_id)
-
-        elif command == 'clear':
-            clear(chat_id)
-
-        elif command == 'next':
-            next_video(chat_id)
-
-        elif command == 'previous':
-            previous_video()
-
-        elif command == 'playing':
-            playing(chat_id)
+        with open('/proc/uptime', 'r') as f:
+            uptime_seconds = float(f.readline().split()[0])
+            uptime_string = str(dt.timedelta(seconds = uptime_seconds))
+            bot.sendMessage(chat_id, uptime_string[:-7])
+    
+    elif command[:2] == 'yt':
+        if len(command) > 4:
+            com = command[3:]
             
-        elif command == 'playlist':
-            show_playlist(chat_id)
+            if com[:3] == 'add':
+                url = com[4:]
+                if instance == None:
+                    start_player()
+                    start_playlist()
+                video = pafy.new(url)
+                add_video(video)
+                list_player.play()
+                
+            elif com[:8] == 'playlist':
+                print(com[9:])
+                try:
+                    for video in pafy.get_playlist(com[9:])['items']:
+                        if instance == None:
+                            start_player()
+                            start_playlist()
+                        add_video(video['pafy'])
+                        list_player.play()
+                except ValueError as v:
+                    bot.sendMessage(chat_id, str(v))
 
-        else:
-            yt= None
-            try:
-                yt = YouTube(command)
-                yt.check_availability()
 
-            except yt_exceptions.RegexMatchError:
-                bot.sendMessage(chat_id, "could not parse that...")
-                mutex.release()
-                return
-            if instance == None:
+            elif com[:4] == 'play':
+                #stop pausing
+                if len(com) == 4:
+                    if instance != None:
+                        player.set_pause(False)
+                    return
+                #play url
                 start_player()
                 start_playlist()
-            if add_video(yt, chat_id):
-                play(chat_id)
+                url = com[5:]
+                video = pafy.new(url)
+                add_video(video)
+                list_player.play()
 
+                
+            elif com[:4] == 'mute':
+                if instance != None:
+                    player.audio_toggle_mute()
+            
+            elif com[:4] == 'next':
+                list_player.next()
 
-        mutex.release()
+            elif com[:5] == 'pause':
+                #toggle pause
+                if instance != None:
+                    player.pause()
 
-    #VLC related ends(mutex)
+            elif com[:5] == 'close':
+                if instance != None:
+                    player.stop()
 
-bot = telepot.Bot('...')
+            elif com[:6] == 'source':
+                if instance == None:
+                    bot.sendMessage(chat_id, 'Nothing is playing at the moment.')
+                else:
+                    title = player.get_media().get_mrl()
+                    bot.sendMessage(chat_id, title)
+    
+
+            elif com[:8] == 'previous':
+                list_player.previous()
+
+    elif command[:6] == 'volume':
+        vol = int(command[7:])
+        if vol >= 0 and vol <= 100:
+            alsaaudio.Mixer('PCM').setvolume(vol)
+
+    else:
+        for com in command.split():
+            if com[:4] == 'http':
+                try:
+                    video = pafy.new(com)
+                    if instance == None:
+                        start_player()
+                        start_playlist()
+                    add_video(video)
+                    list_player.play()
+                    return
+
+                except ValueError as v:
+                    bot.sendMessage(chat_id, str(v))
+                    return
+        #command not recognized
+        bot.sendMessage(chat_id, 'command unknown')
+
+# bot = telepot.Bot('992988366:AAF2_MtPl75umgM0cqeitevgDT6bLxP094k')
+bot = telepot.Bot(<telegram-token>)
 MessageLoop(bot, handle).run_as_thread()
 print('I am listening ...')
 
