@@ -57,28 +57,31 @@ def lower_string(commands):
     return command[:-1]
 
 def commands():
-    answer = '\n'
+    answer = 'commands #show available commands'
+    answer +='\n'
     answer += 'ip'
     answer += '\n'
     answer += 'uptime'
     answer += '\n'
-    answer += 'play'
+    answer += 'volume (<%>) #request / set volume'
     answer += '\n'
-    answer += 'clear'
-    answer += '\n'
-    answer += 'mute'
-    answer += '\n'
-    answer += 'next'
+    answer += 'play all #play everything cached'
     answer += '\n'
     answer += 'pause'
     answer += '\n'
-    answer += 'close'
+    answer += 'stop #end player'
     answer += '\n'
-    answer += 'previous'
+    answer += 'mute'
+    answer += '\n'
+    answer += 'clear #clear all chached somgs'
     answer += '\n'
     answer += 'next'
     answer += '\n'
-    answer += 'volume (<%>)'
+    answer += 'previous'
+    answer += '\n'
+    answer += 'playlist #show cached songs'
+    answer += '\n'
+    answer += 'youtube url #play song from youtube'
     return answer
 
 # preprare vlc
@@ -128,16 +131,13 @@ def add_video(yt, chat_id):
         print(file_path)
         playlist.add_media(file_path)
         bot.sendMessage(chat_id, 'download finished')
-        return True
-
+        return
     except SyntaxError :
         pass
-
     except yt_exceptions.RegexMatchError:
         pass
     callback_chat_id = 0
     bot.sendMessage(chat_id, 'command not recognized/Video not found')
-    return False
 
 def previous_video(chat_id):
     global list_player
@@ -155,43 +155,49 @@ def playing(chat_id):
         print(player.video_get_title_description())
         bot.sendMessage(chat_id, "youtube is playing")
 
-def pause():
+def pause(chat_id):
     global instance, player
     #toggle pause
     if instance != None:
         player.pause()
+        bot.sendMessage(chat_id, "Pause toggled")
+    else:
+        bot.sendMessage(chat_id, "Nothing is playing at the moment.")
 
-def play(chat_id):
+def end():
     global instance, player, playlist
-    if instance == None:
-        start_player()
-        start_playlist()
-        try:
-            for video in os.listdir(video_path+"/"):
-                abs_path = video_path + "/" + video
-                playlist.add_media(abs_path)
-        except FileNotFoundError:
-            pass
+    if instance != None:
+        player.stop()
+        instance = player = playlist = None
+
+def play_all(chat_id):
+    global instance, player, playlist
+    end()
+    start_player()
+    start_playlist()
+    try:
+        for video in os.listdir(video_path+"/"):
+            abs_path = video_path + "/" + video
+            playlist.add_media(abs_path)
+    except FileNotFoundError:
+        pass
     if playlist.count() > 0:
         list_player.play()
         bot.sendMessage(chat_id, "playing")
-
     else:
         bot.sendMessage(chat_id, "nothing to play")
 
 def close(chat_id):
     global instance, player, playlist
     if instance != None:
-        player.stop()
-        instance = player = playlist = None
+        end()
         bot.sendMessage(chat_id, "closed")
     else:
         bot.sendMessage(chat_id, "wasn\'t running")
 
 def clear(chat_id):
     global player, instance
-    if player != None:
-        close(chat_id)
+    end()
     try:
         shutil.rmtree(video_path)
         bot.sendMessage(chat_id, "videos have been cleared")
@@ -203,6 +209,8 @@ def mute(chat_id):
     global instance, player
     if instance != None:
         player.audio_toggle_mute()
+        bot.sendMessage(chat_id, "mute toggled")
+
     else:
         bot.sendMessage(chat_id, "nothing is playing")
 
@@ -210,6 +218,7 @@ def next_video(chat_id):
     global list_player
     if instance is not None:
         list_player.next()
+        bot.sendMessage(chat_id, "next song")
     else:
         bot.sendMessage(chat_id, "nothing is playing")
 
@@ -217,6 +226,7 @@ def previous_video(chat_id):
     global list_player
     if instance is not None:
         list_player.previous()
+        bot.sendMessage(chat_id, "previous song")
     else:
         bot.sendMessage(chat_id, "nothing is playing")
 
@@ -229,7 +239,7 @@ def show_playlist(chat_id):
         for item in os.listdir(video_path+"/"):
             bot.sendMessage(chat_id, item)
     except:
-        bot.sendMessage(chat_id, "nothing at that index")
+        bot.sendMessage(chat_id, "nothing to play")
 
 
 
@@ -257,11 +267,11 @@ def handle(msg):
     else:
         mutex.acquire()
 
-        if command == 'play':
-            play(chat_id)
+        if command == 'play all':
+            play_all(chat_id)
 
         elif command == 'pause':
-            pause()
+            pause(chat_id)
 
         elif command == 'stop':
             close(chat_id)
@@ -276,7 +286,7 @@ def handle(msg):
             next_video(chat_id)
 
         elif command == 'previous':
-            previous_video()
+            previous_video(chat_id)
 
         elif command == 'playing':
             playing(chat_id)
@@ -294,13 +304,11 @@ def handle(msg):
                 bot.sendMessage(chat_id, "could not parse that...")
                 mutex.release()
                 return
-            if instance == None:
-                start_player()
-                start_playlist()
-            if add_video(yt, chat_id):
-                play(chat_id)
-
-
+            end()
+            start_player()
+            start_playlist()
+            add_video(yt, chat_id)
+            list_player.play()
         mutex.release()
 
     #VLC related ends(mutex)
