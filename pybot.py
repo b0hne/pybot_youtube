@@ -1,6 +1,7 @@
 import time
 import threading
 import datetime as dt
+from tkinter import NO
 import telepot
 import os
 from telepot.loop import MessageLoop
@@ -47,6 +48,21 @@ def volume(command):
 
     return get_volume()
 
+def vlc_volume(command):
+    global player
+    if instance == None:
+        return "Player not instantiated"
+    if command != "":
+        try:
+            vol = int(command)
+            if vol >= 0 and vol <= 100:
+                player.audio_set_volume(vol)
+        except ValueError:
+            return 'Volume change not possible. stuck on: ' + player.audio_get_volume()
+    # time to make the adjustment in vlc
+    time.sleep(0.1)
+    return player.audio_get_volume()
+
 def lower_string(commands):
     command = ''
     for com in commands.split():
@@ -65,6 +81,8 @@ def commands():
     answer += '\n'
     answer += 'volume (<%>) #request / set volume'
     answer += '\n'
+    answer += 'vlc volume (<%>) #request / set volume in vlc player'
+    answer += '\n'
     answer += 'play all #play everything cached'
     answer += '\n'
     answer += 'pause'
@@ -81,7 +99,9 @@ def commands():
     answer += '\n'
     answer += 'playlist #show cached songs'
     answer += '\n'
-    answer += 'youtube url #play song from youtube'
+    answer += '<youtube url> #play song from youtube'
+    answer += '\n'
+    answer += 'add <youtube url> #add song to end of playlist'
     return answer
 
 # preprare vlc
@@ -118,26 +138,6 @@ def download_callback(stream, chunks, bytes_remaining):
     if percentage_print_counter == 2 and percentage >= 0.75:
         bot.sendMessage(callback_chat_id, "downloaded 75%")
         percentage_print_counter = 0
-
-
-# add video to playlist, print Volume as prove of reception
-def add_video(yt, chat_id):
-    global playlist, callback_chat_id
-    bot.sendMessage(chat_id, 'trying to initiate download')
-    yt.register_on_progress_callback(download_callback)
-    callback_chat_id = chat_id
-    try:
-        file_path = yt.streams.filter(abr="128kbps").first().download(video_path)
-        print(file_path)
-        playlist.add_media(file_path)
-        bot.sendMessage(chat_id, 'download finished')
-        return
-    except SyntaxError :
-        pass
-    except yt_exceptions.RegexMatchError:
-        pass
-    callback_chat_id = 0
-    bot.sendMessage(chat_id, 'command not recognized/Video not found')
 
 def previous_video(chat_id):
     global list_player
@@ -230,9 +230,6 @@ def previous_video(chat_id):
     else:
         bot.sendMessage(chat_id, "nothing is playing")
 
-
-
-
 def show_playlist(chat_id):
     global list_player, instance
     try:
@@ -240,6 +237,33 @@ def show_playlist(chat_id):
             bot.sendMessage(chat_id, item)
     except:
         bot.sendMessage(chat_id, "nothing to play")
+
+
+
+# add video to playlist, print Volume as prove of reception
+def add_video(yt, restart, chat_id):
+    global playlist, callback_chat_id
+    bot.sendMessage(chat_id, 'trying to initiate download')
+    yt.register_on_progress_callback(download_callback)
+    callback_chat_id = chat_id
+    file_path = ""
+    try:
+        file_path = yt.streams.filter(abr="128kbps").first().download(video_path)
+    except (SyntaxError, yt_exceptions.RegexMatchError):
+        bot.sendMessage(chat_id, 'command not recognized/Video not found')
+        callback_chat_id = 0
+        return
+    print("playlist", playlist)
+    if restart:
+        end()
+        start_player()
+        start_playlist()
+    print(playlist)
+    playlist.add_media(file_path)
+    list_player.play()
+    bot.sendMessage(chat_id, 'download finished')
+    callback_chat_id = 0
+    return
 
 
 
@@ -263,6 +287,8 @@ def handle(msg):
     elif command[:6] == 'volume':
         bot.sendMessage(chat_id, volume(command[7:]))
 
+    elif command[:10] == 'vlc volume':
+        bot.sendMessage(chat_id, vlc_volume(command[11:]))
 
     else:
         mutex.acquire()
@@ -294,6 +320,18 @@ def handle(msg):
         elif command == 'playlist':
             show_playlist(chat_id)
 
+        elif command[:4] == 'add ':
+            yt= None
+            try:
+                yt = YouTube(command[4:])
+                yt.check_availability()
+
+            except yt_exceptions.RegexMatchError:
+                bot.sendMessage(chat_id, "could not parse that...")
+                mutex.release()
+                return
+            add_video(yt, False,chat_id)
+
         else:
             yt= None
             try:
@@ -304,11 +342,12 @@ def handle(msg):
                 bot.sendMessage(chat_id, "could not parse that...")
                 mutex.release()
                 return
-            end()
-            start_player()
-            start_playlist()
-            add_video(yt, chat_id)
-            list_player.play()
+            except yt_exceptions.LiveStreamError:
+                bot.sendMessage(chat_id, "can not play live streams")
+                mutex.release()
+                return
+
+            add_video(yt, True, chat_id)
         mutex.release()
 
     #VLC related ends(mutex)
